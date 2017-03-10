@@ -1,0 +1,278 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: origin-build-monitor
+message: "Jenkins Username = admin & Password = ${JENKINS_PASSWORD} "
+metadata:
+  annotations:
+    description: 'An Jenkins application with php site'
+    iconClass: icon-php
+  creationTimestamp: null
+  name: origin-build-monitor
+objects:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+    name: ${NAME}
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+    selector:
+      name: ${NAME}
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${NAME}
+  spec:
+    host: ${APPLICATION_DOMAIN}
+    to:
+      kind: Service
+      name: ${NAME}
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Allow
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    host: ${JENKINS_DOMAIN}
+    to:
+      kind: Service
+      name: ${JENKINS_SERVICE_NAME}
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Allow
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in the application image
+    name: ${NAME}
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Defines how to build the application
+    name: ${NAME}
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: ${NAME}:latest
+    source:
+      contextDir: /
+      git:
+        ref: ${SOURCE_REPOSITORY_REF}
+        uri: ${SOURCE_REPOSITORY_URL}
+      type: Git
+    strategy:
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          name: php:7.0
+          namespace: openshift
+      type: Source
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+      iconClass: icon-php
+    name: ${NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${NAME}
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${NAME}
+        name: ${NAME}
+      spec:
+        containers:
+        - env:
+          - name: PATH
+            value: /opt/app-root/src/bin:/opt/app-root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          - name: STI_SCRIPTS_URL
+            value: image:///usr/libexec/s2i
+          - name: STI_SCRIPTS_PATH
+            value: /usr/libexec/s2i
+          - name: HOME
+            value: /opt/app-root/src
+          - name: BASH_ENV
+            value: /opt/app-root/etc/scl_enable
+          - name: ENV
+            value: /opt/app-root/etc/scl_enable
+          - name: PROMPT_COMMAND
+            value: . /opt/app-root/etc/scl_enable
+          - name: PHP_VERSION
+            value: "7.0"
+          image: ${NAME}
+          name: app
+          ports:
+          - containerPort: 8080
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - app
+        from:
+          kind: ImageStreamTag
+          name: ${NAME}:latest
+      type: ImageChange
+    - type: ConfigChange
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes the jenkins server
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    ports:
+    - name: jenkins
+      port: 8080
+      targetPort: 8080
+    selector:
+      name: ${JENKINS_SERVICE_NAME}
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the Jenkins
+      iconClass: icon-jenkins
+    name: ${JENKINS_SERVICE_NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${JENKINS_SERVICE_NAME}
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${JENKINS_SERVICE_NAME}
+      spec:
+        containers:
+        - env:
+          - name: JENKINS_PASSWORD
+            value: ${JENKINS_PASSWORD}
+          image: openshift/jenkins-2-centos7@sha256:649d4b6442e04319abfd033fb1b0bbf6c7aaff5538879a109b583013400a2419
+          name: jenkins
+          resources:
+            limits:
+              cpu: "731m"
+              memory: "1Gi"
+            requests:
+              cpu: "18m"
+              memory: "256Mi"
+          ports:
+          - containerPort: 8080
+            protocol: TCP
+          volumeMounts:
+          - mountPath: /var/lib/jenkins/jobs/${CLIENTNAME}
+            name: volume-config
+        restartPolicy: Always
+        volumes:
+        - configMap:
+            name: ${JENKINS_SERVICE_NAME}-config
+          name: volume-config
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - jenkins
+        from:
+          kind: ImageStreamTag
+          name: jenkins:latest
+          namespace: openshift
+        lastTriggeredImage: ""
+      type: ImageChange
+    - type: ConfigChange
+- apiVersion: v1
+  data: 
+    config.xml: |-
+      <?xml version='1.0' encoding='UTF-8'?>
+      <flow-definition plugin="workflow-job@2.9">
+        <actions/>
+        <description></description>
+        <keepDependencies>false</keepDependencies>
+        <properties>
+          <io.fabric8.jenkins.openshiftsync.BuildConfigProjectProperty plugin="openshift-sync@0.1.7">
+            <uid></uid>
+            <namespace></namespace>
+            <name></name>
+            <resourceVersion></resourceVersion>
+          </io.fabric8.jenkins.openshiftsync.BuildConfigProjectProperty>
+          <com.coravy.hudson.plugins.github.GithubProjectProperty plugin="github@1.25.1">
+            <projectUrl>https://github.com/juniorjbn/php-test.git/</projectUrl>
+            <displayName></displayName>
+          </com.coravy.hudson.plugins.github.GithubProjectProperty>
+          <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+            <triggers>
+              <hudson.triggers.TimerTrigger>
+                <spec>H/30 * * * *</spec>
+              </hudson.triggers.TimerTrigger>
+            </triggers>
+          </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+        </properties>
+        <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps@2.24">
+          <scm class="hudson.plugins.git.GitSCM" plugin="git@3.0.1">
+            <configVersion>2</configVersion>
+            <userRemoteConfigs>
+              <hudson.plugins.git.UserRemoteConfig>
+                <url>https://github.com/juniorjbn/php-test.git</url>
+              </hudson.plugins.git.UserRemoteConfig>
+            </userRemoteConfigs>
+            <branches>
+              <hudson.plugins.git.BranchSpec>
+                <name>*/monitor</name>
+              </hudson.plugins.git.BranchSpec>
+            </branches>
+            <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+            <submoduleCfg class="list"/>
+            <extensions/>
+          </scm>
+          <scriptPath>Jenkinsfile</scriptPath>
+        </definition>
+        <triggers/>
+      </flow-definition>
+  kind: ConfigMap
+  metadata:
+    name: ${JENKINS_SERVICE_NAME}-config
+parameters:
+- description: The exposed hostname that will route to the PHP service, if left blank a value will be defaulted.
+  name: NAME
+  value: monitor
+- description: The URL of the repository with your application source code
+  name: SOURCE_REPOSITORY_URL
+  value: https://github.com/juniorjbn/php-test.git
+- description: Set this to a branch name, tag or other ref of your repository if you are not using the default branch
+  name: SOURCE_REPOSITORY_REF
+  value: monitor
+- description: The exposed hostname that will route to the php service, if left blank a value will be defaulted.
+  name: APPLICATION_DOMAIN
+- description: The exposed hostname that will route to the jenkins service, if left blank a value will be defaulted.
+  name: JENKINS_DOMAIN
+- description: Jenkins service name
+  name: JENKINS_SERVICE_NAME
+  value: jenkins
+- description: Password for the Jenkins user
+  displayName: Jenkins password
+  generate: expression
+  from: '[a-zA-Z0-9]{10}'
+  required: true
+  name: JENKINS_PASSWORD
+- description: Client Name to use everywere 
+  displayName: Client Name 
+  name: CLIENTNAME
+  required: true
+
