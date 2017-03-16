@@ -9,11 +9,10 @@ The Jenkins application, must have at least 1GB.
 
 ### Steps:
 
-  - Login in your project with "oc"
-  
-  - Create the apps using the template "oc new-app -f https://raw.githubusercontent.com/getupcloud/origin-build-monitor/master/origin-build-monitor.yaml --param=CLIENTNAME=NameOfTheClient"
-  
-  - Give permission to system user "default" make builds "oc policy add-role-to-user edit -z default"
+  - Clone the repo -> https://github.com/getupcloud/origin-build-monitor.git 
+
+  - Run install.sh with client name as first param. " ./install.sh <Client Name> "
+    - <Client Name> is used to name the jenkins job, also the alarm on pagerduty.
 
 ## That's it, now every 30 minutes your project will make a build, and if it fail, alarm you in PagerDuty.
 The Jenkinsfile and the application, came from: https://github.com/juniorjbn/php-test/tree/monitor
